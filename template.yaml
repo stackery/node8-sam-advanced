@@ -16,6 +16,198 @@ Resources:
       Tracing: Active
       Policies:
         - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Table
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          TABLE_ARN: !GetAtt Table.Arn
+  Graphql:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: !Sub
+        - ${ResourceName} From Stack ${StackTagName} Environment ${EnvironmentTagName}
+        - ResourceName: Graphql
+      AuthenticationType: API_KEY
+      LogConfig:
+        FieldLogLevel: ERROR
+        CloudWatchLogsRoleArn: !GetAtt GraphqlLogsRole.Arn
+  GraphqlSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: !GetAtt Graphql.ApiId
+      DefinitionS3Location: Graphql/schema.graphql
+  GraphqlLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: appsync.amazonaws.com
+          Action: sts:AssumeRole
+      RoleName: !Sub ${AWS::StackName}-Graphql-logs
+      Policies:
+        - PolicyName: Log
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/*:log-stream:*
+  EdgeFunction:
+    Type: Custom::StackeryEdgeFunction
+    Properties:
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:stackery-agent-commander
+      FunctionName: !Sub ${AWS::StackName}-EdgeFunction
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: EdgeFunction
+      Runtime: nodejs8.10
+      CodeUri: src/EdgeFunction
+      Handler: index.handler
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Role: !GetAtt EdgeFunctionRole.Arn
+      Environment:
+        Variables:
+          FUNCTION_NAME: !Ref Function
+          FUNCTION_ARN: !GetAtt Function.Arn
+  EdgeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-EdgeFunction
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service:
+              - lambda.amazonaws.com
+              - edgelambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess
+      Policies:
+        - PolicyName: AccessFunction
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt Function.Arn
+  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TableName: !Sub ${AWS::StackName}-Table
+  GraphqlMutationcreateItemResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      TypeName: Mutation
+      DataSourceName: !GetAtt GraphqlToTableDataSource.Name
+      RequestMappingTemplateS3Location: Graphql/Mutation-createItem-request.vm
+      ResponseMappingTemplateS3Location: Graphql/Mutation-createItem-response.vm
+      ApiId: !GetAtt Graphql.ApiId
+      FieldName: createItem
+    DependsOn: GraphqlSchema
+  GraphqlMutationupdateItemResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      TypeName: Mutation
+      DataSourceName: !GetAtt GraphqlToTableDataSource.Name
+      RequestMappingTemplateS3Location: Graphql/Mutation-updateItem-request.vm
+      ResponseMappingTemplateS3Location: Graphql/Mutation-updateItem-response.vm
+      ApiId: !GetAtt Graphql.ApiId
+      FieldName: updateItem
+    DependsOn: GraphqlSchema
+  GraphqlMutationdeleteItemResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      TypeName: Mutation
+      DataSourceName: !GetAtt GraphqlToTableDataSource.Name
+      RequestMappingTemplateS3Location: Graphql/Mutation-deleteItem-request.vm
+      ResponseMappingTemplateS3Location: Graphql/Mutation-deleteItem-response.vm
+      ApiId: !GetAtt Graphql.ApiId
+      FieldName: deleteItem
+    DependsOn: GraphqlSchema
+  GraphqlQuerylistItemsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      TypeName: Query
+      DataSourceName: !GetAtt GraphqlToTableDataSource.Name
+      RequestMappingTemplateS3Location: Graphql/Query-listItems-request.vm
+      ResponseMappingTemplateS3Location: Graphql/Query-listItems-response.vm
+      ApiId: !GetAtt Graphql.ApiId
+      FieldName: listItems
+    DependsOn: GraphqlSchema
+  GraphqlQuerygetItemResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      TypeName: Query
+      DataSourceName: !GetAtt GraphqlToTableDataSource.Name
+      RequestMappingTemplateS3Location: Graphql/Query-getItem-request.vm
+      ResponseMappingTemplateS3Location: Graphql/Query-getItem-response.vm
+      ApiId: !GetAtt Graphql.ApiId
+      FieldName: getItem
+    DependsOn: GraphqlSchema
+  GraphqlToTableDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt GraphqlToTableAccessRole.Arn
+      ApiId: !GetAtt Graphql.ApiId
+      Name: Table
+      DynamoDBConfig:
+        TableName: !Ref Table
+        AwsRegion: !Ref AWS::Region
+  GraphqlToTableAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: appsync.amazonaws.com
+          Action: sts:AssumeRole
+      RoleName: !Sub ${AWS::StackName}-Graphql-to-Table
+      Policies:
+        - PolicyName: Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !GetAtt Table.Arn
+                  - !Sub ${Table.Arn}/index/*
 Parameters:
   StackTagName:
     Type: String

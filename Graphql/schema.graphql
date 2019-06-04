@@ -1,0 +1,47 @@
+input CreateItemInput {
+	Item: String!
+	options: [String]
+}
+
+input CreateUserInput {
+	name: String!
+	age: Int
+}
+
+type Mutation {
+	createItem(input: CreateItemInput!): Item
+	updateItem(input: UpdateItemInput!): Item
+	deleteItem(id: ID!): Item
+	createUser(input: CreateUserInput!): User
+}
+
+type Query {
+	getItem(id: ID!): Item
+	listItems(limit: Int, nextToken: String): UserForm
+}
+
+type Item {
+	id: ID!
+	Item: String!
+	options: [String]
+	answer: String
+}
+
+input UpdateItemInput {
+	id: ID!
+	Item: String
+	options: [String]
+}
+
+type User {
+	id: ID!
+	name: String!
+	startDate: String!
+	age: Int
+	poll: [Item]
+}
+
+type UserForm {
+	nextToken: String
+	items: [Item]
+}
